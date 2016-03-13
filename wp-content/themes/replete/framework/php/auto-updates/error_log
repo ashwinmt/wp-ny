@@ -1,0 +1,1 @@
+[19-May-2015 17:51:22 America/Chicago] PHP Fatal error:  Call to undefined function current_theme_supports() in /home4/cstrouse/public_html/marnie/wp-content/themes/replete/framework/php/auto-updates/auto-updates.php on line 6
