@@ -1,2 +1,8 @@
 wp-config.php
 wp-content/debug.log
+wp-content/plugins/easy-wp-smtp/
+wp-content/plugins/gmail-smtp/
+wp-content/plugins/wp-database-backup/
+wp-content/plugins/wp-email/
+wp-content/uploads/db-backup/
+
