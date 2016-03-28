@@ -40,6 +40,7 @@ $archive_share = x_get_option( 'x_integrity_portfolio_archive_post_sharing_enabl
         <?php if ( $archive_share == '1' ) : ?>
           <?php x_portfolio_item_social(); ?>
         <?php endif; ?>
+        <?php the_excerpt(); ?>
       </header>
 
     <?php endif; ?>
