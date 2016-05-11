@@ -3,9 +3,9 @@
 Plugin Name: Redis Object Cache
 Plugin URI: http://wordpress.org/plugins/redis-cache/
 Description: A persistent object cache backend powered by Redis. Supports HHVM's Redis extension, the PECL Redis Extension and the Predis library for PHP.
-Version: 1.2.3
+Version: 1.3.2
 Author: Till Krüss
-Author URI: http://till.kruss.me/
+Author URI: https://till.im/
 License: GPLv3
 License URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -100,14 +100,18 @@ function wp_cache_flush( $delay = 0 ) {
  *
  * @param string      $key        The key under which to store the value.
  * @param string      $group      The group value appended to the $key.
+ * @param bool        $force      Optional. Whether to force an update of the local cache from the persistent
+ *                                cache. Default false.
+ * @param bool        &$found     Optional. Whether the key was found in the cache. Disambiguates a return of false,
+ *                                a storable value. Passed by reference. Default null.
  *
  * @global WP_Object_Cache $wp_object_cache
  *
  * @return bool|mixed             Cached object value.
  */
-function wp_cache_get( $key, $group = '' ) {
+function wp_cache_get( $key, $group = '', $force = false, &$found = null ) {
 	global $wp_object_cache;
-	return $wp_object_cache->get( $key, $group );
+	return $wp_object_cache->get( $key, $group, $force, $found );
 }
 
 /**
@@ -155,7 +159,7 @@ function wp_cache_incr( $key, $offset = 1, $group = '' ) {
  */
 function wp_cache_init() {
 	global $wp_object_cache;
-	$wp_object_cache = new WP_Object_Cache();
+	$wp_object_cache = new WP_Object_Cache;
 }
 
 /**
@@ -323,87 +327,66 @@ class WP_Object_Cache {
 	public function __construct() {
 		global $blog_id, $table_prefix;
 
-		$redis = array(
+		$parameters = array(
 			'scheme' => 'tcp',
 			'host' => '127.0.0.1',
 			'port' => 6379
 		);
 
-		if ( defined( 'WP_REDIS_SCHEME' ) ) {
-			$redis[ 'scheme' ] = WP_REDIS_SCHEME;
+		foreach ( [ 'scheme', 'host', 'port', 'path', 'password', 'database' ] as $setting ) {
+			$constant = sprintf( 'WP_REDIS_%s', strtoupper( $setting ) );
+			if ( defined( $constant ) ) {
+				$parameters[ $setting ] = constant( $constant );
+			}
 		}
 
-		if ( defined( 'WP_REDIS_HOST' ) ) {
-			$redis[ 'host' ] = WP_REDIS_HOST;
-		}
+		$client = defined( 'WP_REDIS_CLIENT' ) ? WP_REDIS_CLIENT : null;
 
-		if ( defined( 'WP_REDIS_PORT' ) ) {
-			$redis[ 'port' ] = WP_REDIS_PORT;
-		}
-
-		if ( defined( 'WP_REDIS_PATH' ) ) {
-			$redis[ 'path' ] = WP_REDIS_PATH;
-		}
-
-		if ( defined( 'WP_REDIS_PASSWORD' ) ) {
-			$redis[ 'password' ] = WP_REDIS_PASSWORD;
-		}
-
-		if ( defined( 'WP_REDIS_DATABASE' ) ) {
-			$redis[ 'database' ] = WP_REDIS_DATABASE;
-		}
-
-		$redis_client = defined( 'WP_REDIS_CLIENT' ) ? WP_REDIS_CLIENT : null;
-
-		if ( class_exists( 'Redis' ) && strcasecmp( 'predis', $redis_client ) !== 0 ) {
-			$redis_client = defined( 'HHVM_VERSION' ) ? 'hhvm' : 'pecl';
+		if ( class_exists( 'Redis' ) && strcasecmp( 'predis', $client ) !== 0 ) {
+			$client = defined( 'HHVM_VERSION' ) ? 'hhvm' : 'pecl';
 		} else {
-			$redis_client = 'predis';
+			$client = 'predis';
 		}
 
 		try {
 
-			if ( strcasecmp( 'hhvm', $redis_client ) === 0 ) {
+			if ( strcasecmp( 'hhvm', $client ) === 0 ) {
 
 				$this->redis_client = sprintf( 'HHVM Extension (v%s)', HHVM_VERSION );
 				$this->redis = new Redis();
 
 				// Adjust host and port, if the scheme is `unix`
-				if ( strcasecmp( 'unix', $redis[ 'scheme' ] ) === 0 ) {
-					$redis[ 'host' ] = 'unix://' . $redis[ 'path' ];
-					$redis[ 'port' ] = 0;
+				if ( strcasecmp( 'unix', $parameters[ 'scheme' ] ) === 0 ) {
+					$parameters[ 'host' ] = 'unix://' . $parameters[ 'path' ];
+					$parameters[ 'port' ] = 0;
 				}
 
-				$this->redis->connect( $redis[ 'host' ], $redis[ 'port' ] );
+				$this->redis->connect( $parameters[ 'host' ], $parameters[ 'port' ] );
+			}
 
-				if ( isset( $redis[ 'password' ] ) ) {
-					$this->redis->auth( $redis[ 'password' ] );
-				}
-
-				if ( isset( $redis[ 'database' ] ) ) {
-					$this->redis->select( $redis[ 'database' ] );
-				}
-
-			} elseif ( strcasecmp( 'pecl', $redis_client ) === 0 ) {
+			if ( strcasecmp( 'pecl', $client ) === 0 ) {
 
 				$this->redis_client = sprintf( 'PECL Extension (v%s)', phpversion('redis') );
 				$this->redis = new Redis();
 
-				if ( strcasecmp( 'unix', $redis[ 'scheme' ] ) === 0 ) {
-					$this->redis->connect( $redis[ 'path' ] );
+				if ( strcasecmp( 'unix', $parameters[ 'scheme' ] ) === 0 ) {
+					$this->redis->connect( $parameters[ 'path' ] );
 				} else {
-					$this->redis->connect( $redis[ 'host' ], $redis[ 'port' ] );
+					$this->redis->connect( $parameters[ 'host' ], $parameters[ 'port' ] );
+				}
+			}
+
+			if ( strcasecmp( 'pecl', $client ) === 0 || strcasecmp( 'hhvm', $client ) === 0 ) {
+				if ( isset( $parameters[ 'password' ] ) ) {
+					$this->redis->auth( $parameters[ 'password' ] );
 				}
 
-				if ( isset( $redis[ 'password' ] ) ) {
-					$this->redis->auth( $redis[ 'password' ] );
+				if ( isset( $parameters[ 'database' ] ) ) {
+					$this->redis->select( $parameters[ 'database' ] );
 				}
+			}
 
-				if ( isset( $redis[ 'database' ] ) ) {
-					$this->redis->select( $redis[ 'database' ] );
-				}
-
-			} else {
+			if ( strcasecmp( 'predis', $client ) === 0 ) {
 
 				$this->redis_client = 'Predis';
 
@@ -418,7 +401,19 @@ class WP_Object_Cache {
 					Predis\Autoloader::register();
 				}
 
-				$this->redis = new Predis\Client( $redis );
+				$options = array();
+
+				if ( defined( 'WP_REDIS_CLUSTER' ) ) {
+					$parameters = WP_REDIS_CLUSTER;
+					$options[ 'cluster' ] = 'redis';
+				}
+
+				if ( defined( 'WP_REDIS_SERVERS' ) ) {
+					$parameters = WP_REDIS_SERVERS;
+					$options[ 'replication' ] = true;
+				}
+
+				$this->redis = new Predis\Client( $parameters, $options );
 				$this->redis->connect();
 
 				$this->redis_client .= sprintf( ' (v%s)', Predis\Client::VERSION );
@@ -592,24 +587,36 @@ class WP_Object_Cache {
 	 *
 	 * @param   string        $key        The key under which to store the value.
 	 * @param   string        $group      The group value appended to the $key.
+	 * @param   string        $force      Optional. Whether to force a refetch rather than relying on the local
+	 *                                    cache. Default false.
+	 * @param   bool          &$found     Optional. Whether the key was found in the cache. Disambiguates a return of
+	 *                                    false, a storable value. Passed by reference. Default null.
 	 * @return  bool|mixed                Cached object value.
 	 */
-	public function get( $key, $group = 'default' ) {
+	public function get( $key, $group = 'default', $force = false, &$found = null ) {
 		$derived_key = $this->build_key( $key, $group );
 
-		if ( isset( $this->cache[ $derived_key ] ) ) {
+		if ( isset( $this->cache[ $derived_key ] ) && ! $force ) {
+			$found = true;
 			$this->cache_hits++;
+
 			return is_object( $this->cache[ $derived_key ] ) ? clone $this->cache[ $derived_key ] : $this->cache[ $derived_key ];
 		} elseif ( in_array( $group, $this->no_redis_groups ) || ! $this->redis_status() ) {
+			$found = false;
 			$this->cache_misses++;
+
 			return false;
 		}
 
 		$result = $this->redis->get( $derived_key );
-		if ($result === NULL) {
+
+		if ($result === null || $result === false) {
+			$found = false;
 			$this->cache_misses++;
+
 			return false;
 		} else {
+			$found = true;
 			$this->cache_hits++;
 			$value = $this->maybe_unserialize( $result );
 		}
@@ -618,9 +625,15 @@ class WP_Object_Cache {
 
 		$value = is_object( $value ) ? clone $value : $value;
 
-		do_action( 'redis_object_cache_get', $key, $value, $group );
+		if ( function_exists( 'do_action' ) ) {
+			do_action( 'redis_object_cache_get', $key, $value, $group, $force, $found );
+		}
 
-		return apply_filters( 'redis_object_cache_get', $value, $key, $group );
+		if ( function_exists( 'apply_filters' ) ) {
+			return apply_filters( 'redis_object_cache_get', $value, $key, $group, $force, $found );
+		} else {
+			return $value;
+		}
 	}
 
 	/**
@@ -715,7 +728,9 @@ class WP_Object_Cache {
 			$this->add_to_internal_cache( $derived_key, $value );
 		}
 
-		do_action( 'redis_object_cache_set', $key, $value, $group, $expiration );
+		if ( function_exists( 'do_action' ) ) {
+			do_action( 'redis_object_cache_set', $key, $value, $group, $expiration );
+		}
 
 		return $result;
 	}

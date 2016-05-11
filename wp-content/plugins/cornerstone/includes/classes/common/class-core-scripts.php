@@ -37,13 +37,14 @@ class Cornerstone_Core_Scripts extends Cornerstone_Plugin_Component {
 		), apply_filters( 'cornerstone_icon_map', array() ) );
 
 		wp_localize_script( 'cs-core', 'csCoreData', cs_booleanize( array(
-			'ajaxUrl' => $this->plugin->component('Router')->get_ajax_url(),
-			'fallbackAjaxUrl' => $this->plugin->component('Router')->get_fallback_ajax_url(),
-			'useLegacyAjax' => $this->plugin->component('Router')->use_legacy_ajax(),
+			'ajaxUrl' => $this->plugin->component( 'Router' )->get_ajax_url(),
+			'fallbackAjaxUrl' => $this->plugin->component( 'Router' )->get_fallback_ajax_url(),
+			'useLegacyAjax' => $this->plugin->component( 'Router' )->use_legacy_ajax(),
 			'debug' => ( $this->plugin->common()->isDebug() ),
 			'elementDefinitions' => $definitions,
 			'isRTL' => is_rtl(),
 			'strings' => array( 'test' => 'test' ),
+			'_cs_nonce' => wp_create_nonce( 'cornerstone_nonce' ),
 			'unfilteredHTML' => current_user_can( 'unfiltered_html' ),
 			'iconMaps' => $icon_maps
 		) ) );

@@ -77,7 +77,7 @@ class Envira_Gallery_License {
         $this->maybe_verify_key();
 
         // Add potential admin notices for actions around the admin.
-        // add_action( 'admin_notices', array( $this, 'notices' ) );
+        add_action( 'admin_notices', array( $this, 'notices' ) );
 
         // Grab the license key. If it is not set (even after verification), return early.
         $this->key = $this->base->get_license_key();
